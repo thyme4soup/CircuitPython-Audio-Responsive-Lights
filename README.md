@@ -14,7 +14,7 @@ and this gives us noticeable lag.
 Once I have the materials I can set up the analog pin to read from an audio jack directly, so we can sample at a much lower rate
 and (hopefully) have a quicker loop
 
-## Setup and Testing
+### Setup and Testing
 
 The code is built specifically for the CPX (circuit playground express) board at the moment, as it relies on some
 library functions as well as hardware (lights, microphone) that are board-specific, but eventually it should
