@@ -8,24 +8,38 @@ import audiobusio
 from adafruit_circuitplayground.express import cpx
 import math
 
+'''
+TODO:
+  + Deal with precision loss on time.monotonic() after long periods of runtime
+  + Faster fft
+'''
+
+# Fiddling with things to fix time precision loss
+def cur_time():
+    return time.monotonic()
+
 # Base colors
 WHITE = (50, 50, 50)
 RED = (220, 0, 0)
 OFF   = (0,   0,  0)
 
+########## Startup animation
 print("startup")
 cpx.pixels.brightness = 0.1
+STARTUP = 0.3
 for i in range(20):
-    s = time.monotonic()
+    s = cur_time()
     if i < 10:
         cpx.pixels[i % 10] = (int(255 - (255 * i / 10)), 0, int(255 * i / 10))
     else:
         cpx.pixels[i % 10] = (0, int(255 * (i - 10) / 10), int(255 - (255 * (i - 10) / 10)))
     cpx.pixels[(i - 1) % 10] = OFF
-    while time.monotonic() - s < (0.25 / 20):
+    while cur_time() - s < (STARTUP / 20):
         pass
 cpx.pixels.fill(OFF)
+########## End startup animation
 
+########## FFT Functions
 # This is a reimplementation of numpy.fft.fftfreq for circuitpython
 def fftfreq(n, d=1.0):
     freqs = [0]*n
@@ -79,7 +93,9 @@ def fft(nums, forward=True, scale=False):
     return nums 
 
 # END pull (didn't use the full library bc it required cmath)
+########## End FFT Functions
 
+########## Main Code
 analogin = AnalogIn(board.A1)
 
 def getVoltage(pin):
@@ -237,4 +253,5 @@ while True:
     # Normally we would include a sleep, but the loop is slow enough as is.
     duration = time.monotonic() - start
     print("done in {}ms".format(1000 * duration))
-    
+
+########## End Main Code
