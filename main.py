@@ -1,5 +1,4 @@
 import time
-import random
 import microcontroller
 import array
 from analogio import AnalogIn
@@ -7,26 +6,33 @@ import board
 import audiobusio
 from adafruit_circuitplayground.express import cpx
 import math
-
 '''
 TODO:
   + Deal with precision loss on time.monotonic() after long periods of runtime
-  + Faster fft
+    + Minor fix is added by resetting the board during the first idle period after 24 hours.
+      Expected precision loss is +- 4ms by the time of the reset, which translates to
+      only a minor loss in accuracy when we eventually handle audio sampling directly
+  + Faster fft (maybe move methods to mpy file?)
 '''
 
+
 # Fiddling with things to fix time precision loss
+IDLE_THRESHOLD    = 15         # s until we determine that the speaker is idle (15 seconds)
+RESTART_THRESHOLD = 86400      # s until time.monotonic() is due for a reset (24 hours)
 def cur_time():
     return time.monotonic()
+startup_monotonic = cur_time() # the monotonic start of our reset
+idle_start        = cur_time() # the monotonic of the last meaningful update
 
 # Base colors
 WHITE = (50, 50, 50)
-RED = (220, 0, 0)
+RED   = (220, 0, 0)
 OFF   = (0,   0,  0)
 
 ########## Startup animation
 print("startup")
 cpx.pixels.brightness = 0.1
-STARTUP = 0.3
+STARTUP_DURATION = 1
 for i in range(20):
     s = cur_time()
     if i < 10:
@@ -34,7 +40,7 @@ for i in range(20):
     else:
         cpx.pixels[i % 10] = (0, int(255 * (i - 10) / 10), int(255 - (255 * (i - 10) / 10)))
     cpx.pixels[(i - 1) % 10] = OFF
-    while cur_time() - s < (STARTUP / 20):
+    while cur_time() - s < (STARTUP_DURATION / 20):
         pass
 cpx.pixels.fill(OFF)
 ########## End startup animation
@@ -112,7 +118,7 @@ color_threshold = 8
 # Brightness, Low, Med, High
 current = (0, 0, 0, 0)
 
-# The threshold lowers during music and slowly raises during quiet periods
+# The threshold lowers during music and climbs during idle periods
 # The dynamic sensitivity avoids false flashing and allows for sensitivity during quiet songs
 THRESHOLD_H = 4.0
 THRESHOLD_L = 1.5
@@ -129,13 +135,12 @@ samples = 64
 
 freqs = fftfreq(samples)[:int(samples/2)]
 
-# To avoid flashing we use an attack/fade approach
+# To avoid flashing we use a modified attack/fade based in part on a reactive lighting system by Jared
+# (reference http://jared.geek.nz/2013/jan/sound-reactive-led-lights)
 def shift_to_target(brightness, colors):
     global current
     b, lo, med, hi = current
     
-    # It would be cleaner to use an array and iterate, but the board doesn't
-    # have enough memory to hold more than 64 samples unless we use a tuple here
     if b < brightness:
         b = min(b + brightness_attack, maxed)
     elif b > brightness:
@@ -211,24 +216,24 @@ def setLights(mags, freq):
     # The assignment goes from low to high with index, so 1, 2, 3 means red low, green med, blue high
     cpx.pixels.fill((current[1], current[3], current[2]))
 
+def handleReset():
+    global idle_start
+    if current != (0, 0, 0, 0):
+        idle_start = cur_time()
+    if cur_time() - startup_monotonic > RESTART_THRESHOLD and cur_time() - idle_start > IDLE_THRESHOLD:
+        microcontroller.reset()
+
 #freqs = [0., 0.125, 0.25, 0.375, -0.5, -0.375, -0.25, -0.125]
 mic = audiobusio.PDMIn(board.MICROPHONE_CLOCK, board.MICROPHONE_DATA, frequency=frq, bit_depth=16)
 
-'''
-This is the main loop of the program. We begin by sampling, performing fft, and then setting the lights.
-Currently we read on the microphone, but this has a lot of noise and samples at an unnecessarily high freq**.
-Eventually, we'd like to read on an analog pin and handle lower frequencies better. Space is an issue,
-so we can't sample more than 64 samples without running out of stack. I suspect that the fft only
-works on powers of 2, so jumping to 128 samples is the only expansion available
-
-** with a lower sampling frequency we can appraise lower frequencies better, right now everything sub-1000hz is
-   lumped into 500hz
-'''
 while True:
     start = time.monotonic()
     nums = [0] * samples
     
     ''' This snippet is for analog reading on a pin rather than the mic
+    This can be viable considering both of these:
+        https://github.com/adafruit/circuitpython/issues/484
+        https://github.com/adafruit/circuitpython/issues/487
     for i in range(samples):
         voltage = getVoltage(analogin)
         nums[i] = voltage
@@ -249,6 +254,9 @@ while True:
     
     # Then we handle the result in a separate function
     setLights(nums, frq)
+    
+    # Handle the reset for monotonic after handling input
+    handleReset()
     
     # Normally we would include a sleep, but the loop is slow enough as is.
     duration = time.monotonic() - start
